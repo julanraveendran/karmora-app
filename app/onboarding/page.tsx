@@ -21,19 +21,6 @@ import { REPLY_STYLE_LABELS } from '@/types'
 
 const TOTAL_STEPS = 6
 
-// Mock subreddit suggestions
-const MOCK_SUBREDDIT_SUGGESTIONS = [
-  'startups',
-  'SaaS',
-  'entrepreneur',
-  'smallbusiness',
-  'marketing',
-  'growmybusiness',
-  'indiehackers',
-  'webdev',
-  'productivity',
-]
-
 // Progress stages for step 5
 const SETUP_STAGES = [
   'Collecting new posts...',
@@ -64,9 +51,9 @@ export default function OnboardingPage() {
   // Setup progress state (step 5)
   const [setupStageIndex, setSetupStageIndex] = useState(0)
   
-  // Load subreddit suggestions when moving to step 3
+  // Load AI-powered subreddit suggestions when moving to step 3
   useEffect(() => {
-    if (currentStep === 3 && subredditSuggestions.length === 0) {
+    if (currentStep === 3 && subredditSuggestions.length === 0 && productName) {
       loadSuggestions()
     }
   }, [currentStep])
@@ -91,11 +78,36 @@ export default function OnboardingPage() {
   async function loadSuggestions() {
     setLoadingSuggestions(true)
     try {
-      // TODO: Call API to get AI-powered suggestions
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      setSubredditSuggestions(MOCK_SUBREDDIT_SUGGESTIONS)
-    } catch {
-      toast.error('Failed to load suggestions')
+      // Call API to get AI-powered suggestions based on product info
+      const response = await fetch('/api/subreddits/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productName,
+          oneLiner,
+          icp,
+        }),
+      })
+      
+      const data = await response.json()
+      
+      if (data.subreddits && Array.isArray(data.subreddits)) {
+        setSubredditSuggestions(data.subreddits)
+      } else {
+        throw new Error('Invalid response')
+      }
+    } catch (error) {
+      console.error('Failed to load suggestions:', error)
+      toast.error('Failed to load suggestions, showing defaults')
+      // Fallback suggestions
+      setSubredditSuggestions([
+        'startups',
+        'SaaS',
+        'entrepreneur',
+        'smallbusiness',
+        'marketing',
+        'growmybusiness',
+      ])
     } finally {
       setLoadingSuggestions(false)
     }
@@ -151,14 +163,34 @@ export default function OnboardingPage() {
       }
     }
     
-    // Save onboarding data after step 3
-    if (currentStep === 3) {
+    // Save onboarding data after step 3 (before setup animation)
+    if (currentStep === 4) {
       setLoading(true)
       try {
-        // TODO: Call API to save onboarding data
-        await new Promise(resolve => setTimeout(resolve, 500))
-      } catch {
-        toast.error('Failed to save onboarding data')
+        const response = await fetch('/api/onboarding', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product: {
+              productName,
+              oneLiner,
+              icp,
+              websiteUrl: websiteUrl || undefined,
+              replyStyle,
+              softMention,
+            },
+            subreddits: selectedSubreddits,
+          }),
+        })
+        
+        const data = await response.json()
+        
+        if (!data.ok) {
+          throw new Error(data.error || 'Failed to save')
+        }
+      } catch (error) {
+        console.error('Failed to save onboarding:', error)
+        toast.error('Failed to save onboarding data. Please try again.')
         setLoading(false)
         return
       }
@@ -173,8 +205,8 @@ export default function OnboardingPage() {
   }
   
   async function handleComplete() {
-    // TODO: Call API to mark onboarding as complete
     router.push('/leads')
+    router.refresh()
   }
 
   return (
@@ -336,14 +368,14 @@ export default function OnboardingPage() {
                 Choose your subreddits
               </h2>
               <p className="text-sm mb-6 text-[#6B6B6B]">
-                Select up to 5 subreddits where your customers hang out.
+                AI-suggested subreddits based on your product. Select up to 5.
               </p>
               
               {loadingSuggestions ? (
                 <div className="flex flex-col items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-[#0A0A0A]" />
                   <p className="mt-4 text-sm text-[#6B6B6B]">
-                    Finding subreddits...
+                    Finding subreddits for {productName}...
                   </p>
                 </div>
               ) : (
@@ -377,10 +409,11 @@ export default function OnboardingPage() {
                     </div>
                   </div>
                   
-                  {/* Suggestions */}
+                  {/* AI Suggestions */}
                   <div className="mb-4">
                     <p className="text-xs font-medium mb-2 text-[#9A9A9A]">
-                      Suggestions
+                      <Sparkles size={12} className="inline mr-1" />
+                      AI Suggestions for &quot;{productName}&quot;
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {subredditSuggestions
