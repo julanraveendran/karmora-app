@@ -3,6 +3,9 @@ import { createClient } from '@/lib/supabase/server'
 import { DashboardSidebar } from '@/components/dashboard/sidebar'
 import { Toaster } from '@/components/ui/sonner'
 
+// Force dynamic rendering since we use cookies for auth
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardLayout({
   children,
 }: {
