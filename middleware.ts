@@ -6,11 +6,12 @@ export async function middleware(request: NextRequest) {
     request,
   })
 
+  // Skip auth check if env vars not set (during build or misconfiguration)
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-  // Skip auth check if env vars not set
+  
   if (!supabaseUrl || !supabaseKey) {
+    console.warn('Supabase environment variables not set, skipping auth middleware')
     return response
   }
 
@@ -35,8 +36,30 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session
-  await supabase.auth.getUser()
+  // Refresh session if expired
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // Protected routes - redirect to login if not authenticated
+  const protectedPaths = ['/leads', '/settings', '/templates', '/onboarding']
+  const isProtectedPath = protectedPaths.some(path => 
+    request.nextUrl.pathname.startsWith(path)
+  )
+
+  if (isProtectedPath && !user) {
+    const redirectUrl = new URL('/login', request.url)
+    redirectUrl.searchParams.set('redirect', request.nextUrl.pathname)
+    return NextResponse.redirect(redirectUrl)
+  }
+
+  // Redirect logged-in users away from auth pages
+  const authPaths = ['/login', '/signup']
+  const isAuthPath = authPaths.some(path => 
+    request.nextUrl.pathname === path
+  )
+
+  if (isAuthPath && user) {
+    return NextResponse.redirect(new URL('/leads', request.url))
+  }
 
   return response
 }
