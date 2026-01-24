@@ -23,14 +23,12 @@ export async function getLLMProvider(type?: ProviderType): Promise<LLMProvider> 
   const providerType = type || (process.env.LLM_PROVIDER as ProviderType) || 'openai'
   
   switch (providerType) {
-    case 'openai': {
+    case 'openai':
       const { OpenAIProvider } = await import('./openai')
       return new OpenAIProvider()
-    }
-    case 'anthropic': {
+    case 'anthropic':
       const { AnthropicProvider } = await import('./anthropic')
       return new AnthropicProvider()
-    }
     default:
       throw new Error(`Unknown LLM provider: ${providerType}`)
   }
