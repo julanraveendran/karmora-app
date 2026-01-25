@@ -2,20 +2,48 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getLLMProvider } from '@/lib/llm/provider'
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic'
+
 export async function POST(request: NextRequest) {
   try {
+    // Check for OpenAI API key first
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OPENAI_API_KEY is not set')
+      return NextResponse.json({ 
+        subreddits: [
+          'startups',
+          'SaaS',
+          'entrepreneur',
+          'smallbusiness',
+          'marketing',
+          'growmybusiness',
+        ],
+        error: 'OpenAI API key not configured'
+      })
+    }
+
     const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError) {
+      console.error('Auth error:', authError.message)
+    }
 
     if (!user) {
+      console.error('No authenticated user found')
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { productName, oneLiner, icp } = await request.json()
+    const body = await request.json()
+    const { productName, oneLiner, icp } = body
 
     if (!productName || !oneLiner || !icp) {
+      console.error('Missing fields:', { productName: !!productName, oneLiner: !!oneLiner, icp: !!icp })
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
+
+    console.log('Generating subreddit suggestions for:', productName)
 
     // Use LLM to suggest relevant subreddits
     const llmProvider = await getLLMProvider()
@@ -77,6 +105,9 @@ Return a JSON array of subreddit names, e.g.: ["startups", "SaaS", "entrepreneur
     return NextResponse.json({ subreddits })
   } catch (error) {
     console.error('Subreddit suggestion error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error details:', errorMessage)
+    
     // Return fallback suggestions on error
     return NextResponse.json({ 
       subreddits: [
@@ -86,7 +117,8 @@ Return a JSON array of subreddit names, e.g.: ["startups", "SaaS", "entrepreneur
         'smallbusiness',
         'marketing',
         'growmybusiness',
-      ]
+      ],
+      debug: process.env.NODE_ENV === 'development' ? errorMessage : undefined
     })
   }
 }

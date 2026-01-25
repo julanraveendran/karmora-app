@@ -91,14 +91,24 @@ export default function OnboardingPage() {
       
       const data = await response.json()
       
+      if (!response.ok) {
+        console.error('API error:', data.error)
+        throw new Error(data.error || 'API request failed')
+      }
+      
       if (data.subreddits && Array.isArray(data.subreddits)) {
         setSubredditSuggestions(data.subreddits)
+        if (data.error) {
+          // API returned fallback due to an error
+          console.warn('API returned fallback suggestions:', data.error)
+        }
       } else {
-        throw new Error('Invalid response')
+        throw new Error('Invalid response format')
       }
     } catch (error) {
       console.error('Failed to load suggestions:', error)
-      toast.error('Failed to load suggestions, showing defaults')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Failed to load AI suggestions: ${errorMessage}`)
       // Fallback suggestions
       setSubredditSuggestions([
         'startups',
