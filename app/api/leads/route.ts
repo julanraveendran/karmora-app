@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { scrapeSubreddits, processRedditPosts, type ScoredPost } from '@/lib/reddit'
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic'
 
 // GET /api/leads - Fetch leads for the current user
 export async function GET(request: NextRequest) {
@@ -43,7 +47,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/leads - Refresh leads (fetch from Reddit)
+// POST /api/leads - Refresh leads (fetch from Reddit via Apify)
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
@@ -63,27 +67,82 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No subreddits configured' }, { status: 400 })
     }
 
-    // TODO: Implement Reddit API fetch
-    // For now, return mock data indicating refresh happened
-    // In production, this would:
-    // 1. Fetch posts from Reddit API for each subreddit
-    // 2. Filter by intent signals
-    // 3. Score and store new leads
-    // 4. Return count of new leads
+    const subreddits = targets.map(t => t.subreddit)
+    console.log(`Refreshing leads for user ${user.id}, subreddits: ${subreddits.join(', ')}`)
 
-    const added = Math.floor(Math.random() * 5) + 1
+    // Scrape Reddit posts using Apify
+    const rawPosts = await scrapeSubreddits(subreddits, 30)
+    
+    // Process and filter for high-intent leads
+    const qualifiedLeads = processRedditPosts(rawPosts, {
+      windowDays: 7,
+      minScore: 2,
+    })
+
+    // Get existing reddit_post_ids to avoid duplicates
+    const { data: existingLeads } = await supabase
+      .from('leads')
+      .select('reddit_post_id')
+      .eq('user_id', user.id)
+
+    const existingIds = new Set(existingLeads?.map(l => l.reddit_post_id) || [])
+
+    // Filter out duplicates
+    const newLeads = qualifiedLeads.filter(
+      post => !existingIds.has(post.parsedId)
+    )
+
+    // Insert new leads into database
+    let addedCount = 0
+    if (newLeads.length > 0) {
+      const leadsToInsert = newLeads.map((post: ScoredPost) => ({
+        user_id: user.id,
+        subreddit: post.parsedCommunityName,
+        reddit_post_id: post.parsedId,
+        title: post.title,
+        author: post.username,
+        url: post.url,
+        created_utc: post.createdAt,
+        snippet: post.body?.substring(0, 500) || null,
+        status: 'new',
+        score: post.intentScore,
+        fetched_at: new Date().toISOString(),
+      }))
+
+      const { data: insertedLeads, error: insertError } = await supabase
+        .from('leads')
+        .insert(leadsToInsert)
+        .select()
+
+      if (insertError) {
+        console.error('Error inserting leads:', insertError)
+        // Continue anyway, some leads might have been inserted
+      }
+
+      addedCount = insertedLeads?.length || 0
+    }
+
+    // Get total count
     const { count } = await supabase
       .from('leads')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
 
     return NextResponse.json({ 
-      added, 
-      total: (count || 0) + added,
-      message: 'Leads refreshed successfully'
+      added: addedCount,
+      total: count || 0,
+      processed: rawPosts.length,
+      qualified: qualifiedLeads.length,
+      message: addedCount > 0 
+        ? `Added ${addedCount} new leads` 
+        : 'No new leads found (all duplicates or low intent)'
     })
   } catch (error) {
     console.error('Leads refresh error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ 
+      error: 'Failed to refresh leads',
+      details: errorMessage
+    }, { status: 500 })
   }
 }

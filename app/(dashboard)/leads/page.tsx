@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, ExternalLink, MessageSquare, X, Copy, Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -28,52 +28,6 @@ function formatRelativeTime(dateString: string): string {
   if (diffDays === 1) return '1 day ago'
   return `${diffDays} days ago`
 }
-
-// Mock data for development (will be replaced with API calls)
-const MOCK_LEADS: Lead[] = [
-  {
-    id: '1',
-    user_id: 'mock-user',
-    subreddit: 'startups',
-    reddit_post_id: 'abc123',
-    title: 'Looking for a tool to help me find leads on Reddit - any recommendations?',
-    author: 'startup_founder_2024',
-    url: 'https://reddit.com/r/startups/comments/abc123',
-    created_utc: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    snippet: "I've been manually searching Reddit for potential customers but it's taking forever. Does anyone know of a tool that can help automate finding relevant threads?",
-    status: 'new',
-    score: 6,
-    fetched_at: new Date().toISOString(),
-  },
-  {
-    id: '2',
-    user_id: 'mock-user',
-    subreddit: 'entrepreneur',
-    reddit_post_id: 'def456',
-    title: "What's the best way to do outreach without being spammy?",
-    author: 'indie_maker',
-    url: 'https://reddit.com/r/entrepreneur/comments/def456',
-    created_utc: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-    snippet: "I have a B2B SaaS and want to reach out to potential customers on Reddit but I don't want to come across as spammy.",
-    status: 'new',
-    score: 5,
-    fetched_at: new Date().toISOString(),
-  },
-  {
-    id: '3',
-    user_id: 'mock-user',
-    subreddit: 'SaaS',
-    reddit_post_id: 'ghi789',
-    title: 'Alternative to [competitor] for Reddit marketing?',
-    author: 'saas_growth_guy',
-    url: 'https://reddit.com/r/SaaS/comments/ghi789',
-    created_utc: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
-    snippet: "Been using [competitor] but it's getting expensive. Looking for alternatives that can help me find relevant discussions.",
-    status: 'viewed',
-    score: 7,
-    fetched_at: new Date().toISOString(),
-  },
-]
 
 interface LeadCardProps {
   lead: Lead
@@ -217,8 +171,8 @@ function LeadCard({
 }
 
 export default function LeadsPage() {
-  const [leads, setLeads] = useState<Lead[]>(MOCK_LEADS)
-  const [loading, setLoading] = useState(false)
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [generatingReplyFor, setGeneratingReplyFor] = useState<string | null>(null)
   const [generatedReplies, setGeneratedReplies] = useState<Record<string, string>>({})
@@ -226,6 +180,28 @@ export default function LeadsPage() {
   // Filters
   const [subredditFilter, setSubredditFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  
+  // Fetch leads from API
+  const fetchLeads = useCallback(async () => {
+    try {
+      const response = await fetch('/api/leads')
+      const data = await response.json()
+      
+      if (data.leads) {
+        setLeads(data.leads)
+      }
+    } catch (error) {
+      console.error('Failed to fetch leads:', error)
+      toast.error('Failed to load leads')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+  
+  // Load leads on mount
+  useEffect(() => {
+    fetchLeads()
+  }, [fetchLeads])
   
   // Get unique subreddits from leads
   const subreddits = [...new Set(leads.map(l => l.subreddit))]
@@ -241,11 +217,20 @@ export default function LeadsPage() {
   async function handleRefresh() {
     setRefreshing(true)
     try {
-      // TODO: Call API to refresh leads
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      toast.success('Added 3 new leads')
-    } catch {
-      toast.error('Failed to refresh leads')
+      const response = await fetch('/api/leads', { method: 'POST' })
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to refresh')
+      }
+      
+      toast.success(data.message || `Added ${data.added} new leads`)
+      
+      // Reload leads after refresh
+      await fetchLeads()
+    } catch (error) {
+      console.error('Failed to refresh leads:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to refresh leads')
     } finally {
       setRefreshing(false)
     }
@@ -254,39 +239,47 @@ export default function LeadsPage() {
   async function handleGenerateReply(leadId: string) {
     setGeneratingReplyFor(leadId)
     try {
-      // TODO: Call API to generate reply
-      await new Promise(resolve => setTimeout(resolve, 3000))
+      const response = await fetch(`/api/leads/${leadId}/generate`, { method: 'POST' })
+      const data = await response.json()
       
-      // Mock reply
-      const mockReply = `Great question! I've dealt with this exact challenge before.
-
-Here's what worked for me:
-1. Focus on threads where people are actively asking for help
-2. Always lead with value before mentioning any tools
-3. Be genuine - Reddit users can spot marketing a mile away
-
-One thing that helped me was setting up alerts for specific keywords in relevant subreddits.
-
-Hope that helps!`
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate reply')
+      }
       
-      setGeneratedReplies(prev => ({ ...prev, [leadId]: mockReply }))
+      setGeneratedReplies(prev => ({ ...prev, [leadId]: data.replyText }))
       
-      // Update lead status
+      // Update lead status locally
       setLeads(prev => prev.map(l => 
         l.id === leadId ? { ...l, status: 'viewed' as LeadStatus } : l
       ))
-    } catch {
+    } catch (error) {
+      console.error('Failed to generate reply:', error)
       toast.error('Failed to generate reply')
     } finally {
       setGeneratingReplyFor(null)
     }
   }
   
-  function handleDismiss(leadId: string) {
-    setLeads(prev => prev.map(l => 
-      l.id === leadId ? { ...l, status: 'dismissed' as LeadStatus } : l
-    ))
-    toast.success('Lead dismissed')
+  async function handleDismiss(leadId: string) {
+    try {
+      const response = await fetch(`/api/leads/${leadId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'dismissed' }),
+      })
+      
+      if (!response.ok) {
+        throw new Error('Failed to dismiss lead')
+      }
+      
+      setLeads(prev => prev.map(l => 
+        l.id === leadId ? { ...l, status: 'dismissed' as LeadStatus } : l
+      ))
+      toast.success('Lead dismissed')
+    } catch (error) {
+      console.error('Failed to dismiss lead:', error)
+      toast.error('Failed to dismiss lead')
+    }
   }
 
   return (
@@ -310,7 +303,7 @@ Hope that helps!`
           {refreshing ? (
             <>
               <Loader2 size={16} className="animate-spin" />
-              <span className="ml-2">Refreshing...</span>
+              <span className="ml-2">Scraping Reddit...</span>
             </>
           ) : (
             <>
