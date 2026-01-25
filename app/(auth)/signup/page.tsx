@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Mail, Eye, EyeOff, ArrowRight, Loader2 } from 'lucide-react'
+import { Mail, Eye, EyeOff, ArrowRight, Loader2, CheckCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,6 +17,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [showConfirmation, setShowConfirmation] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,11 +35,11 @@ export default function SignupPage() {
     setLoading(true)
     
     const supabase = createClient()
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/leads`,
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
     })
     
@@ -48,9 +49,62 @@ export default function SignupPage() {
       return
     }
     
-    // Redirect to onboarding
+    // Check if email confirmation is required (no session = email confirmation needed)
+    if (!data.session) {
+      setShowConfirmation(true)
+      setLoading(false)
+      return
+    }
+    
+    // Redirect to onboarding (session exists, email confirmation disabled)
     router.push('/onboarding')
     router.refresh()
+  }
+
+  // Show confirmation screen after signup when email verification is required
+  if (showConfirmation) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#FEFEFE]">
+        <div 
+          className="fixed inset-0 -z-10 opacity-40"
+          style={{
+            backgroundImage: 'radial-gradient(circle, #E5E5E5 1px, transparent 1px)',
+            backgroundSize: '24px 24px',
+          }}
+        />
+        
+        <div className="w-full max-w-md bg-white rounded-2xl shadow-lg border border-[#EAEAEA] p-8 text-center">
+          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="w-8 h-8 text-green-600" />
+          </div>
+          
+          <h1 className="text-2xl font-semibold mb-2 text-[#0A0A0A]">
+            Check your email
+          </h1>
+          <p className="text-[#6B6B6B] mb-6">
+            We sent a confirmation link to <strong className="text-[#0A0A0A]">{email}</strong>
+          </p>
+          <p className="text-sm text-[#9A9A9A] mb-8">
+            Click the link in the email to verify your account and start using Karmora.
+          </p>
+          
+          <div className="space-y-3">
+            <Button
+              variant="outline"
+              className="w-full rounded-full"
+              onClick={() => setShowConfirmation(false)}
+            >
+              Use a different email
+            </Button>
+            <Link href="/login">
+              <Button variant="ghost" className="w-full">
+                Already confirmed? Sign in
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

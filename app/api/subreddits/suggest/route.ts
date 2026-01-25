@@ -32,7 +32,15 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       console.error('No authenticated user found')
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      // Return detailed debug info for troubleshooting
+      return NextResponse.json({ 
+        error: 'Unauthorized',
+        debug: {
+          authError: authError?.message || null,
+          authCode: authError?.code || null,
+          hint: 'Session may have expired or cookies not sent'
+        }
+      }, { status: 401 })
     }
 
     const body = await request.json()

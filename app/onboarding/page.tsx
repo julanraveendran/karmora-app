@@ -82,6 +82,7 @@ export default function OnboardingPage() {
       const response = await fetch('/api/subreddits/suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // Ensure cookies are sent
         body: JSON.stringify({
           productName,
           oneLiner,
@@ -92,8 +93,9 @@ export default function OnboardingPage() {
       const data = await response.json()
       
       if (!response.ok) {
-        console.error('API error:', data.error)
-        throw new Error(data.error || 'API request failed')
+        console.error('API error:', data.error, data.debug)
+        const debugInfo = data.debug ? ` (${data.debug.hint || data.debug.authError || ''})` : ''
+        throw new Error((data.error || 'API request failed') + debugInfo)
       }
       
       if (data.subreddits && Array.isArray(data.subreddits)) {

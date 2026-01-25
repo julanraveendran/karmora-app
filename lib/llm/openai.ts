@@ -15,29 +15,22 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   async generateReply(messages: LLMMessage[]): Promise<LLMResponse> {
-    try {
-      console.log('OpenAI: Sending request...')
-      const response = await this.client.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
-        max_tokens: 500,
-        temperature: 0.7,
-      })
+    const response = await this.client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      })),
+      max_tokens: 500,
+      temperature: 0.7,
+    })
 
-      const content = response.choices[0]?.message?.content || ''
-      console.log('OpenAI: Response received, length:', content.length)
+    const content = response.choices[0]?.message?.content || ''
 
-      return {
-        content,
-        provider: 'openai',
-        model: 'gpt-4o-mini',
-      }
-    } catch (error) {
-      console.error('OpenAI API error:', error)
-      throw error
+    return {
+      content,
+      provider: 'openai',
+      model: 'gpt-4o-mini',
     }
   }
 }
