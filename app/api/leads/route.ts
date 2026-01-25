@@ -50,8 +50,16 @@ export async function GET(request: NextRequest) {
 // POST /api/leads - Refresh leads (fetch from Reddit via Apify)
 export async function POST(request: NextRequest) {
   try {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:entry',message:'POST /api/leads called',data:{hasApifyToken:!!process.env.APIFY_API_TOKEN},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
+
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:auth',message:'Auth check',data:{hasUser:!!user,userId:user?.id?.substring(0,8)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -63,6 +71,10 @@ export async function POST(request: NextRequest) {
       .select('subreddit')
       .eq('user_id', user.id)
 
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:targets',message:'Subreddit targets',data:{count:targets?.length||0,subreddits:targets?.map(t=>t.subreddit)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+
     if (!targets || targets.length === 0) {
       return NextResponse.json({ error: 'No subreddits configured' }, { status: 400 })
     }
@@ -70,8 +82,16 @@ export async function POST(request: NextRequest) {
     const subreddits = targets.map(t => t.subreddit)
     console.log(`Refreshing leads for user ${user.id}, subreddits: ${subreddits.join(', ')}`)
 
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:beforeScrape',message:'About to scrape Reddit',data:{subreddits},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+
     // Scrape Reddit posts using Apify
     const rawPosts = await scrapeSubreddits(subreddits, 30)
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:afterScrape',message:'Scraping completed',data:{rawPostsCount:rawPosts.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     
     // Process and filter for high-intent leads
     const qualifiedLeads = processRedditPosts(rawPosts, {
@@ -140,6 +160,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Leads refresh error:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack?.substring(0, 500) : null
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:catch',message:'Error caught',data:{errorMessage,errorStack},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A,B,C,D'})}).catch(()=>{});
+    // #endregion
+    
     return NextResponse.json({ 
       error: 'Failed to refresh leads',
       details: errorMessage

@@ -2,7 +2,6 @@
 
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import RadarAnimation from './RadarAnimation'
 
 const HeroSection = () => {
   return (
@@ -83,15 +82,6 @@ const HeroSection = () => {
             </span>
           </motion.div>
         </div>
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.8, delay: 0.6 }}
-          className="mt-16 md:mt-24"
-        >
-          <RadarAnimation />
-        </motion.div>
       </div>
     </section>
   )
