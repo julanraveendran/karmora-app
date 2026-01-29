@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { scrapeSubreddits, processRedditPosts, type ScoredPost } from '@/lib/reddit'
+import { startRedditScrape, getRunStatus, getDatasetItems, processRedditPosts, type ScoredPost } from '@/lib/reddit'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -77,74 +77,22 @@ export async function POST(request: NextRequest) {
     }
 
     const subreddits = targets.map(t => t.subreddit)
-    console.log(`Refreshing leads for user ${user.id}, subreddits: ${subreddits.join(', ')}`)
+    console.log(`Starting Reddit scrape for user ${user.id}, subreddits: ${subreddits.join(', ')}`)
 
-    // Scrape Reddit posts using Apify
-    const rawPosts = await scrapeSubreddits(subreddits, 30)
+    // Start the Apify run (async - don't wait for completion)
+    const runId = await startRedditScrape(subreddits, 30)
+    console.log(`Apify run started: ${runId}`)
     
-    // Process and filter for high-intent leads
-    const qualifiedLeads = processRedditPosts(rawPosts, {
-      windowDays: 7,
-      minScore: 2,
-    })
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:runStarted',message:'Run started async',data:{runId,subreddits},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
 
-    // Get existing reddit_post_ids to avoid duplicates
-    const { data: existingLeads } = await supabase
-      .from('leads')
-      .select('reddit_post_id')
-      .eq('user_id', user.id)
-
-    const existingIds = new Set(existingLeads?.map(l => l.reddit_post_id) || [])
-
-    // Filter out duplicates
-    const newLeads = qualifiedLeads.filter(
-      post => !existingIds.has(post.parsedId)
-    )
-
-    // Insert new leads into database
-    let addedCount = 0
-    if (newLeads.length > 0) {
-      const leadsToInsert = newLeads.map((post: ScoredPost) => ({
-        user_id: user.id,
-        subreddit: post.parsedCommunityName,
-        reddit_post_id: post.parsedId,
-        title: post.title,
-        author: post.username,
-        url: post.url,
-        created_utc: post.createdAt,
-        snippet: post.body?.substring(0, 500) || null,
-        status: 'new',
-        score: post.intentScore,
-        fetched_at: new Date().toISOString(),
-      }))
-
-      const { data: insertedLeads, error: insertError } = await supabase
-        .from('leads')
-        .insert(leadsToInsert)
-        .select()
-
-      if (insertError) {
-        console.error('Error inserting leads:', insertError)
-        // Continue anyway, some leads might have been inserted
-      }
-
-      addedCount = insertedLeads?.length || 0
-    }
-
-    // Get total count
-    const { count } = await supabase
-      .from('leads')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-
+    // Return immediately - scraping happens in background
+    // Frontend will poll /api/leads/status?runId=xxx to check completion
     return NextResponse.json({ 
-      added: addedCount,
-      total: count || 0,
-      processed: rawPosts.length,
-      qualified: qualifiedLeads.length,
-      message: addedCount > 0 
-        ? `Added ${addedCount} new leads` 
-        : 'No new leads found (all duplicates or low intent)'
+      status: 'scraping',
+      runId,
+      message: 'Scraping started. Leads will appear automatically when ready.'
     })
   } catch (error) {
     console.error('Leads refresh error:', error)

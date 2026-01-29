@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { RefreshCw, ExternalLink, MessageSquare, X, Copy, Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -177,6 +177,7 @@ export default function LeadsPage() {
   const [generatingReplyFor, setGeneratingReplyFor] = useState<string | null>(null)
   const [generatedReplies, setGeneratedReplies] = useState<Record<string, string>>({})
   const [hasAutoRefreshed, setHasAutoRefreshed] = useState(false)
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
   // Filters
   const [subredditFilter, setSubredditFilter] = useState<string>('all')
@@ -218,18 +219,55 @@ export default function LeadsPage() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      const response = await fetch('/api/leads', { method: 'POST' })
-      const data = await response.json()
+      // Start the scraping run (returns immediately)
+      const startResponse = await fetch('/api/leads', { method: 'POST' })
+      const startData = await startResponse.json()
       
-      if (!response.ok) {
-        const errorMsg = data.error || data.details || 'Failed to refresh'
+      if (!startResponse.ok) {
+        const errorMsg = startData.error || startData.details || 'Failed to start scraping'
         throw new Error(errorMsg)
       }
       
-      toast.success(data.message || `Added ${data.added} new leads`)
-      
-      // Reload leads after refresh
-      await fetchLeads()
+      if (startData.status === 'scraping' && startData.runId) {
+        // Poll for completion
+        toast.info('Scraping started... This may take a few minutes.')
+        
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResponse = await fetch(`/api/leads/status?runId=${startData.runId}`)
+            const statusData = await statusResponse.json()
+            
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval)
+              toast.success(statusData.message || `Added ${statusData.added} new leads`)
+              await fetchLeads()
+              setRefreshing(false)
+            } else if (statusData.status === 'failed' || statusData.status === 'error') {
+              clearInterval(pollInterval)
+              toast.error(statusData.error || 'Scraping failed')
+              setRefreshing(false)
+            }
+            // If still running, continue polling
+          } catch (pollError) {
+            console.error('Polling error:', pollError)
+            // Continue polling on transient errors
+          }
+        }, 5000) // Poll every 5 seconds
+        
+        // Timeout after 10 minutes
+        setTimeout(() => {
+          clearInterval(pollInterval)
+          if (refreshing) {
+            setRefreshing(false)
+            toast.error('Scraping is taking longer than expected. Please check back in a few minutes.')
+          }
+        }, 600000) // 10 minutes
+      } else {
+        // Legacy synchronous response (shouldn't happen, but handle it)
+        toast.success(startData.message || `Added ${startData.added} new leads`)
+        await fetchLeads()
+        setRefreshing(false)
+      }
     } catch (error) {
       console.error('Failed to refresh leads:', error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to refresh leads'
@@ -239,10 +277,18 @@ export default function LeadsPage() {
           : undefined,
         duration: 5000,
       })
-    } finally {
       setRefreshing(false)
     }
   }, [fetchLeads])
+  
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current)
+      }
+    }
+  }, [])
   
   // Auto-trigger scraping if no leads found on first load (after onboarding)
   useEffect(() => {
