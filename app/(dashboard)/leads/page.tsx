@@ -176,6 +176,7 @@ export default function LeadsPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [generatingReplyFor, setGeneratingReplyFor] = useState<string | null>(null)
   const [generatedReplies, setGeneratedReplies] = useState<Record<string, string>>({})
+  const [hasAutoRefreshed, setHasAutoRefreshed] = useState(false)
   
   // Filters
   const [subredditFilter, setSubredditFilter] = useState<string>('all')
@@ -214,7 +215,7 @@ export default function LeadsPage() {
     return true
   })
   
-  async function handleRefresh() {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
       const response = await fetch('/api/leads', { method: 'POST' })
@@ -234,7 +235,15 @@ export default function LeadsPage() {
     } finally {
       setRefreshing(false)
     }
-  }
+  }, [fetchLeads])
+  
+  // Auto-trigger scraping if no leads found on first load (after onboarding)
+  useEffect(() => {
+    if (!loading && leads.length === 0 && !hasAutoRefreshed && !refreshing) {
+      setHasAutoRefreshed(true)
+      handleRefresh()
+    }
+  }, [loading, leads.length, hasAutoRefreshed, refreshing, handleRefresh])
   
   async function handleGenerateReply(leadId: string) {
     setGeneratingReplyFor(leadId)

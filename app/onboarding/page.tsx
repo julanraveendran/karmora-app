@@ -50,6 +50,7 @@ export default function OnboardingPage() {
   
   // Setup progress state (step 5)
   const [setupStageIndex, setSetupStageIndex] = useState(0)
+  const [scrapingTriggered, setScrapingTriggered] = useState(false)
   
   // Load AI-powered subreddit suggestions when moving to step 3
   useEffect(() => {
@@ -199,6 +200,15 @@ export default function OnboardingPage() {
         
         if (!data.ok) {
           throw new Error(data.error || 'Failed to save')
+        }
+        
+        // Trigger lead scraping in the background after saving onboarding
+        if (!scrapingTriggered) {
+          setScrapingTriggered(true)
+          fetch('/api/leads', { method: 'POST' }).catch(err => {
+            console.error('Failed to trigger lead scraping:', err)
+            // Don't show error to user, scraping can happen later
+          })
         }
       } catch (error) {
         console.error('Failed to save onboarding:', error)
