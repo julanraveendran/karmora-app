@@ -222,7 +222,8 @@ export default function LeadsPage() {
       const data = await response.json()
       
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to refresh')
+        const errorMsg = data.error || data.details || 'Failed to refresh'
+        throw new Error(errorMsg)
       }
       
       toast.success(data.message || `Added ${data.added} new leads`)
@@ -231,7 +232,13 @@ export default function LeadsPage() {
       await fetchLeads()
     } catch (error) {
       console.error('Failed to refresh leads:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to refresh leads')
+      const errorMessage = error instanceof Error ? error.message : 'Failed to refresh leads'
+      toast.error(errorMessage, {
+        description: error instanceof Error && error.message.includes('APIFY') 
+          ? 'The Reddit scraping service needs to be configured. Please check Vercel environment variables.'
+          : undefined,
+        duration: 5000,
+      })
     } finally {
       setRefreshing(false)
     }
