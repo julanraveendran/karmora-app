@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { startRedditScrape, getRunStatus, getDatasetItems, processRedditPosts, type ScoredPost } from '@/lib/reddit'
+import { startRedditScrape, getRunStatus } from '@/lib/reddit'
 
 // Force dynamic rendering
 export const dynamic = 'force-dynamic'
@@ -77,11 +77,69 @@ export async function POST(request: NextRequest) {
     }
 
     const subreddits = targets.map(t => t.subreddit)
-    console.log(`Starting Reddit scrape for user ${user.id}, subreddits: ${subreddits.join(', ')}`)
+    console.log(`Checking for existing scrape for user ${user.id}`)
 
-    // Start the Apify run (async - don't wait for completion)
-    const runId = await startRedditScrape(subreddits, 30)
+    // Check if user already has a scrape in progress
+    // Note: If current_scrape_run_id column doesn't exist, this will return null
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('current_scrape_run_id')
+      .eq('id', user.id)
+      .single()
+
+    // If column doesn't exist, profileError will contain the error
+    // We'll handle it gracefully by treating it as no existing run
+    let runId = profileError ? null : profile?.current_scrape_run_id
+
+    // If there's an existing runId, check its status
+    if (runId) {
+      try {
+        const { status } = await getRunStatus(runId)
+        console.log(`Existing run ${runId} status: ${status}`)
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:checkExisting',message:'Checked existing run',data:{runId,status},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+
+        // If still running, return the existing runId
+        if (status === 'RUNNING' || status === 'READY' || status === 'READY_FOR_RUN') {
+          return NextResponse.json({ 
+            status: 'scraping',
+            runId,
+            message: 'Scraping already in progress. Leads will appear automatically when ready.'
+          })
+        }
+        
+        // If completed/failed, clear it and start a new one
+        console.log(`Existing run ${runId} is ${status}, starting new scrape`)
+        await supabase
+          .from('profiles')
+          .update({ current_scrape_run_id: null })
+          .eq('id', user.id)
+      } catch (error) {
+        console.error('Error checking existing run status:', error)
+        // If we can't check status, assume it's invalid and start a new one
+        runId = null
+      }
+    }
+
+    // Start a new Apify run
+    console.log(`Starting new Reddit scrape for user ${user.id}, subreddits: ${subreddits.join(', ')}`)
+    runId = await startRedditScrape(subreddits, 30)
     console.log(`Apify run started: ${runId}`)
+    
+    // Store the runId in the user's profile
+    // If column doesn't exist, this will fail silently (we'll handle it)
+    await supabase
+      .from('profiles')
+      .update({ current_scrape_run_id: runId })
+      .eq('id', user.id)
+      .then(({ error }) => {
+        if (error && error.code === '42703') {
+          // Column doesn't exist - log but don't fail
+          console.warn('current_scrape_run_id column not found. Please run migration to add it.')
+        }
+      })
     
     // #region agent log
     fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/route.ts:POST:runStarted',message:'Run started async',data:{runId,subreddits},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});

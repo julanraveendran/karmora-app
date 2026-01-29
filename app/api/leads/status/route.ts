@@ -41,6 +41,18 @@ export async function GET(request: NextRequest) {
     }
 
     if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
+      // Clear the failed runId from user's profile
+      await supabase
+        .from('profiles')
+        .update({ current_scrape_run_id: null })
+        .eq('id', user.id)
+        .then(({ error }) => {
+          if (error && error.code === '42703') {
+            // Column doesn't exist - ignore
+            console.warn('current_scrape_run_id column not found')
+          }
+        })
+      
       return NextResponse.json({ 
         status: 'failed',
         error: `Scraping failed with status: ${status}`
@@ -113,6 +125,12 @@ export async function GET(request: NextRequest) {
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/status:GET:complete',message:'Processing complete',data:{runId,addedCount,total:count},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
       // #endregion
+
+      // Clear the runId from user's profile since scraping is complete
+      await supabase
+        .from('profiles')
+        .update({ current_scrape_run_id: null })
+        .eq('id', user.id)
 
       return NextResponse.json({ 
         status: 'completed',
