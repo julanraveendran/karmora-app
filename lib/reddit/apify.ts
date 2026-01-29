@@ -125,30 +125,43 @@ export async function getRunStatus(runId: string): Promise<{
 
 /**
  * Wait for a run to complete (with timeout)
+ * Increased timeout to 240s to allow for longer scraping runs
  */
 export async function waitForRun(
   runId: string,
-  timeoutMs: number = 120000,
-  pollIntervalMs: number = 3000
+  timeoutMs: number = 240000, // 4 minutes (Vercel allows up to 300s)
+  pollIntervalMs: number = 5000 // Poll every 5 seconds instead of 3
 ): Promise<string> {
   const startTime = Date.now()
+  let lastStatus = 'UNKNOWN'
   
   while (Date.now() - startTime < timeoutMs) {
-    const { status, datasetId } = await getRunStatus(runId)
-    
-    if (status === 'SUCCEEDED') {
-      return datasetId
+    try {
+      const { status, datasetId } = await getRunStatus(runId)
+      lastStatus = status
+      
+      if (status === 'SUCCEEDED') {
+        console.log(`Apify run ${runId} succeeded after ${Math.round((Date.now() - startTime) / 1000)}s`)
+        return datasetId
+      }
+      
+      if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
+        throw new Error(`Apify run failed with status: ${status}`)
+      }
+      
+      // Still running, log progress and wait
+      const elapsed = Math.round((Date.now() - startTime) / 1000)
+      console.log(`Apify run ${runId} still running (${status}) after ${elapsed}s`)
+      
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
+    } catch (error) {
+      // If getRunStatus fails, log but continue polling (might be transient)
+      console.error(`Error checking run status for ${runId}:`, error)
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
     }
-    
-    if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
-      throw new Error(`Apify run failed with status: ${status}`)
-    }
-    
-    // Still running, wait and poll again
-    await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
   }
   
-  throw new Error('Apify run timed out')
+  throw new Error(`Apify run timed out after ${Math.round(timeoutMs / 1000)}s (last status: ${lastStatus})`)
 }
 
 /**
@@ -179,24 +192,51 @@ export async function scrapeSubreddits(
   subreddits: string[],
   maxItemsPerSubreddit: number = 30
 ): Promise<RedditPost[]> {
+  const startTime = Date.now()
+  
   try {
     console.log(`Starting Reddit scrape for subreddits: ${subreddits.join(', ')}`)
     
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/reddit/apify.ts:scrapeSubreddits:start',message:'Starting scrape',data:{subreddits,maxItemsPerSubreddit,startTime},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // Start the scraping run
     const runId = await startRedditScrape(subreddits, maxItemsPerSubreddit)
-    console.log(`Apify run started: ${runId}`)
+    const startRunTime = Date.now()
+    console.log(`Apify run started: ${runId} (took ${startRunTime - startTime}ms)`)
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/reddit/apify.ts:scrapeSubreddits:runStarted',message:'Run started',data:{runId,timeToStart:startRunTime-startTime},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     // Wait for completion
     const datasetId = await waitForRun(runId)
-    console.log(`Apify run completed, dataset: ${datasetId}`)
+    const waitCompleteTime = Date.now()
+    console.log(`Apify run completed, dataset: ${datasetId} (waited ${waitCompleteTime - startRunTime}ms)`)
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/reddit/apify.ts:scrapeSubreddits:runCompleted',message:'Run completed',data:{datasetId,waitTime:waitCompleteTime-startRunTime},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     // Fetch and return results
     const posts = await getDatasetItems(datasetId)
-    console.log(`Fetched ${posts.length} posts from Reddit`)
+    const totalTime = Date.now() - startTime
+    console.log(`Fetched ${posts.length} posts from Reddit (total time: ${totalTime}ms)`)
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/reddit/apify.ts:scrapeSubreddits:complete',message:'Scrape complete',data:{postCount:posts.length,totalTime},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     
     return posts
   } catch (error) {
-    console.error('scrapeSubreddits error:', error)
+    const errorTime = Date.now() - startTime
+    console.error(`scrapeSubreddits error after ${errorTime}ms:`, error)
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'lib/reddit/apify.ts:scrapeSubreddits:error',message:'Scrape error',data:{errorTime,errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // Re-throw with more context
     if (error instanceof Error) {
       throw new Error(`Reddit scraping failed: ${error.message}`)
