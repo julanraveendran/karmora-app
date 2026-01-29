@@ -66,8 +66,26 @@ export async function startRedditScrape(
   )
   
   if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Apify API error: ${error}`)
+    const errorText = await response.text()
+    let errorMessage = `Apify API error (${response.status}): ${errorText}`
+    
+    // Try to parse as JSON for better error message
+    try {
+      const errorJson = JSON.parse(errorText)
+      if (errorJson.error?.message) {
+        errorMessage = `Apify API error: ${errorJson.error.message}`
+      }
+    } catch {
+      // Keep the text error if not JSON
+    }
+    
+    console.error('Apify startRedditScrape error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+    })
+    
+    throw new Error(errorMessage)
   }
   
   const result: ApifyRunResponse = await response.json()
@@ -88,7 +106,14 @@ export async function getRunStatus(runId: string): Promise<{
   )
   
   if (!response.ok) {
-    throw new Error(`Failed to get run status: ${response.statusText}`)
+    const errorText = await response.text()
+    console.error('Apify getRunStatus error:', {
+      status: response.status,
+      statusText: response.statusText,
+      error: errorText,
+      runId,
+    })
+    throw new Error(`Failed to get run status (${response.status}): ${errorText}`)
   }
   
   const result = await response.json()
@@ -154,19 +179,28 @@ export async function scrapeSubreddits(
   subreddits: string[],
   maxItemsPerSubreddit: number = 30
 ): Promise<RedditPost[]> {
-  console.log(`Starting Reddit scrape for subreddits: ${subreddits.join(', ')}`)
-  
-  // Start the scraping run
-  const runId = await startRedditScrape(subreddits, maxItemsPerSubreddit)
-  console.log(`Apify run started: ${runId}`)
-  
-  // Wait for completion
-  const datasetId = await waitForRun(runId)
-  console.log(`Apify run completed, dataset: ${datasetId}`)
-  
-  // Fetch and return results
-  const posts = await getDatasetItems(datasetId)
-  console.log(`Fetched ${posts.length} posts from Reddit`)
-  
-  return posts
+  try {
+    console.log(`Starting Reddit scrape for subreddits: ${subreddits.join(', ')}`)
+    
+    // Start the scraping run
+    const runId = await startRedditScrape(subreddits, maxItemsPerSubreddit)
+    console.log(`Apify run started: ${runId}`)
+    
+    // Wait for completion
+    const datasetId = await waitForRun(runId)
+    console.log(`Apify run completed, dataset: ${datasetId}`)
+    
+    // Fetch and return results
+    const posts = await getDatasetItems(datasetId)
+    console.log(`Fetched ${posts.length} posts from Reddit`)
+    
+    return posts
+  } catch (error) {
+    console.error('scrapeSubreddits error:', error)
+    // Re-throw with more context
+    if (error instanceof Error) {
+      throw new Error(`Reddit scraping failed: ${error.message}`)
+    }
+    throw error
+  }
 }

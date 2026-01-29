@@ -150,19 +150,32 @@ export async function POST(request: NextRequest) {
     console.error('Leads refresh error:', error)
     const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     
+    // Log full error details for debugging
+    console.error('Full error details:', {
+      message: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+    
     // Provide more helpful error messages
     let userFriendlyError = 'Failed to refresh leads'
     if (errorMessage.includes('APIFY_API_TOKEN')) {
       userFriendlyError = 'Reddit scraping service is not configured. Please contact support.'
     } else if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
       userFriendlyError = 'Scraping took too long. Please try again in a moment.'
-    } else if (errorMessage.includes('Apify')) {
-      userFriendlyError = 'Reddit scraping service error. Please try again.'
+    } else if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      userFriendlyError = 'Invalid API token. Please check Apify configuration.'
+    } else if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      userFriendlyError = 'API access denied. Please check Apify account permissions.'
+    } else if (errorMessage.includes('Apify') || errorMessage.includes('Reddit scraping')) {
+      // Include the actual error message from Apify
+      userFriendlyError = errorMessage.includes('Reddit scraping failed:') 
+        ? errorMessage.replace('Reddit scraping failed: ', '')
+        : `Reddit scraping error: ${errorMessage}`
     }
     
     return NextResponse.json({ 
       error: userFriendlyError,
-      details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+      details: process.env.NODE_ENV === 'development' ? errorMessage : errorMessage.substring(0, 200)
     }, { status: 500 })
   }
 }
