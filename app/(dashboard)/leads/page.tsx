@@ -230,37 +230,76 @@ export default function LeadsPage() {
       
       if (startData.status === 'scraping' && startData.runId) {
         // Poll for completion
-        toast.info('Scraping started... This may take a few minutes.')
+        toast.info('Scraping started... This may take a few minutes.', { duration: 10000 })
+        console.log('Starting polling for runId:', startData.runId)
         
-        const pollInterval = setInterval(async () => {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'leads/page.tsx:handleRefresh:pollStart',message:'Starting polling',data:{runId:startData.runId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        
+        // Clear any existing polling interval
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current)
+        }
+        
+        let pollCount = 0
+        pollingIntervalRef.current = setInterval(async () => {
+          pollCount++
+          console.log(`Polling attempt ${pollCount} for runId: ${startData.runId}`)
+          
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'leads/page.tsx:handleRefresh:poll',message:'Polling status',data:{runId:startData.runId,pollCount},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
+          
           try {
             const statusResponse = await fetch(`/api/leads/status?runId=${startData.runId}`)
             const statusData = await statusResponse.json()
             
+            console.log(`Poll ${pollCount} result:`, statusData.status, statusData)
+            
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'leads/page.tsx:handleRefresh:pollResult',message:'Poll result',data:{runId:startData.runId,status:statusData.status,added:statusData.added,message:statusData.message},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
+            
             if (statusData.status === 'completed') {
-              clearInterval(pollInterval)
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current)
+                pollingIntervalRef.current = null
+              }
               toast.success(statusData.message || `Added ${statusData.added} new leads`)
               await fetchLeads()
               setRefreshing(false)
             } else if (statusData.status === 'failed' || statusData.status === 'error') {
-              clearInterval(pollInterval)
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current)
+                pollingIntervalRef.current = null
+              }
               toast.error(statusData.error || 'Scraping failed')
               setRefreshing(false)
+            } else if (statusData.status === 'running') {
+              // Still running, show progress every 30 seconds (6 polls)
+              if (pollCount % 6 === 0) {
+                toast.info(`Still scraping... (${Math.round(pollCount * 5 / 60)} minutes elapsed)`, { duration: 3000 })
+              }
             }
             // If still running, continue polling
           } catch (pollError) {
             console.error('Polling error:', pollError)
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'leads/page.tsx:handleRefresh:pollError',message:'Poll error',data:{runId:startData.runId,error:String(pollError)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
             // Continue polling on transient errors
           }
         }, 5000) // Poll every 5 seconds
         
         // Timeout after 10 minutes
         setTimeout(() => {
-          clearInterval(pollInterval)
-          if (refreshing) {
-            setRefreshing(false)
-            toast.error('Scraping is taking longer than expected. Please check back in a few minutes.')
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current)
+            pollingIntervalRef.current = null
           }
+          setRefreshing(false)
+          toast.error('Scraping is taking longer than expected. Please check back in a few minutes.')
         }, 600000) // 10 minutes
       } else {
         // Legacy synchronous response (shouldn't happen, but handle it)

@@ -32,7 +32,8 @@ export async function GET(request: NextRequest) {
     fetch('http://127.0.0.1:7243/ingest/04888eb7-f203-4669-a2a5-2bd5700effeb',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api/leads/status:GET:status',message:'Run status',data:{runId,status,datasetId},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'A'})}).catch(()=>{});
     // #endregion
 
-    if (status === 'RUNNING' || status === 'READY') {
+    // Handle various running states
+    if (status === 'RUNNING' || status === 'READY' || status === 'READY_FOR_RUN') {
       return NextResponse.json({ 
         status: 'running',
         message: 'Scraping in progress...'
